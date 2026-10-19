@@ -53,6 +53,42 @@ class SetupTests(unittest.TestCase):
         with patch.dict(sys.modules, {"kaggle_secrets": SimpleNamespace(UserSecretsClient=client)}):
             setup_vscode(tunnel_secret_name="TUNNEL", install_code=False, accept_license=True)
         self.ensure_code.assert_called_once_with("code", install=False)
-        auth.assert_called_once_with("github-secret")
+        auth.assert_called_once()
+        self.assertEqual(auth.call_args.kwargs["environment"]["GH_TOKEN"], "github-secret")
+        self.assertEqual(session.call_args.kwargs["environment"]["VSCODE_CLI_ACCESS_TOKEN"], "tunnel-secret")
         session.return_value.start.assert_called_once_with(
             token="tunnel-secret", timeout=120, auth_timeout=600, accept_license=True)
+
+    @patch("kaggle_vscode.setup.os", SimpleNamespace(name="posix", environ=os.environ))
+    @patch("kaggle_vscode.setup.require")
+    @patch("kaggle_vscode.setup.authenticate_gh")
+    @patch("kaggle_vscode.setup.tunnel._active", None)
+    @patch("kaggle_vscode.setup.tunnel.VSCodeTunnel")
+    def test_caller_environment_forwarded_without_pat_fallback_or_mutation(self, session, auth, require):
+        client = MagicMock()
+        client.return_value.get_secret.return_value = " github-secret "
+        environment = {"EXAMPLE_SETTING": "custom"}
+        with patch.dict(os.environ, {}, clear=True), patch.dict(sys.modules, {"kaggle_secrets": SimpleNamespace(UserSecretsClient=client)}):
+            setup_vscode(environment=environment, accept_license=True)
+        child = session.call_args.kwargs["environment"]
+        self.assertEqual(child["GH_TOKEN"], "github-secret")
+        self.assertEqual(child["EXAMPLE_SETTING"], "custom")
+        self.assertNotIn("VSCODE_CLI_ACCESS_TOKEN", child)
+        self.assertEqual(environment, {"EXAMPLE_SETTING": "custom"})
+        client.return_value.get_secret.assert_called_once_with("GITHUB_TOKEN")
+
+    @patch("kaggle_vscode.setup.os", SimpleNamespace(name="posix", environ=os.environ))
+    @patch("kaggle_vscode.setup.require")
+    @patch("kaggle_vscode.setup.authenticate_gh")
+    @patch("kaggle_vscode.setup.tunnel._active")
+    def test_credential_change_rejected_before_authentication(self, active, auth, require):
+        from pathlib import Path
+        active.name, active.workspace, active.code = "kaggle-gpu", Path.cwd(), "code"
+        active._token, active._tunnel_token = "old-token", None
+        active.is_running.return_value = True
+        client = MagicMock()
+        client.return_value.get_secret.return_value = "new-token"
+        with patch.dict(sys.modules, {"kaggle_secrets": SimpleNamespace(UserSecretsClient=client)}):
+            with self.assertRaisesRegex(RuntimeError, "credentials changed"):
+                setup_vscode(accept_license=True)
+        auth.assert_not_called()

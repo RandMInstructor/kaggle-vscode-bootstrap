@@ -33,6 +33,37 @@ class AuthTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 authenticate_gh(token)
 
+    @patch.dict(os.environ, {}, clear=True)
+    @patch("kaggle_vscode.auth.shutil.which", return_value="gh")
+    @patch("kaggle_vscode.auth.subprocess.run")
+    def test_explicit_environment_copied_and_tokens_kept_separate(self, run, which):
+        run.return_value.stdout = "example-user"
+        environment = {"GH_TOKEN": " github-secret ", "VSCODE_CLI_ACCESS_TOKEN": "tunnel-secret"}
+        original = environment.copy()
+        authenticate_gh(environment=environment)
+        self.assertEqual(environment, original)
+        child = run.call_args.kwargs["env"]
+        self.assertEqual(child["GH_TOKEN"], "github-secret")
+        self.assertEqual(child["VSCODE_CLI_ACCESS_TOKEN"], "tunnel-secret")
+        self.assertEqual(child["GH_PROMPT_DISABLED"], "1")
+        self.assertNotIn("VSCODE_CLI_ACCESS_TOKEN", os.environ)
+
+    @patch.dict(os.environ, {}, clear=True)
+    @patch("kaggle_vscode.auth.shutil.which", return_value="gh")
+    @patch("kaggle_vscode.auth.subprocess.run")
+    def test_explicit_token_wins_and_positional_setup_git_remains_compatible(self, run, which):
+        run.return_value.stdout = "example-user"
+        environment = {"GH_TOKEN": "old"}
+        authenticate_gh("new", False, environment=environment)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.kwargs["env"]["GH_TOKEN"], "new")
+        self.assertEqual(environment["GH_TOKEN"], "old")
+
+    def test_environment_requires_github_token(self):
+        for environment in ({}, {"GH_TOKEN": " "}, {"VSCODE_CLI_ACCESS_TOKEN": "tunnel-only"}):
+            with self.assertRaises(ValueError):
+                authenticate_gh(environment=environment)
+
     @patch("kaggle_vscode.auth.shutil.which", return_value=None)
     def test_missing_cli(self, which):
         with self.assertRaisesRegex(RuntimeError, "Missing gh"):

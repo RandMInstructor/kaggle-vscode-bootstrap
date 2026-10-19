@@ -25,6 +25,10 @@ if "user" in sys.argv:
     sys.exit(0)
 print("inherited=" + str(bool(os.environ.get("GH_TOKEN"))), flush=True)
 print("vscode_pat=" + str("VSCODE_CLI_ACCESS_TOKEN" in os.environ), flush=True)
+if os.environ.get("EXPECT_SEPARATE_TOKENS"):
+    assert os.environ["GH_TOKEN"] == "github-secret"
+    assert os.environ["VSCODE_CLI_ACCESS_TOKEN"] == "tunnel-secret"
+    print("separate_tokens=True", flush=True)
 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1000)"])
 print("child=" + str(child.pid), flush=True)
 def shutdown(*args):
@@ -112,6 +116,17 @@ time.sleep(1000)
         self.session.start("tunnel-secret", accept_license=True)
         self.assertEqual(self.session._tunnel_token, "tunnel-secret")
         self.assertIn("vscode_pat=True", self.session.logs())
+
+    def test_constructor_environment_snapshot_reaches_child(self):
+        environment = {"GH_TOKEN": "github-secret", "VSCODE_CLI_ACCESS_TOKEN": "tunnel-secret",
+                       "EXPECT_SEPARATE_TOKENS": "1"}
+        self.session = VSCodeTunnel("test", self.root / "tunnel.log", str(self.code), self.root,
+                                    environment=environment)
+        environment["GH_TOKEN"] = "changed-after-construction"
+        self.session.start(accept_license=True)
+        self.assertIn("separate_tokens=True", self.session.logs())
+        self.assertEqual(self.session._token, "github-secret")
+        self.assertEqual(self.session._tunnel_token, "tunnel-secret")
 
     @patch.dict(os.environ, {"FAKE_UNAUTHORIZED": "1"})
     def test_service_rejection_requires_device_reauthentication(self):

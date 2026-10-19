@@ -30,14 +30,14 @@ The CLI must support `code tunnel --help` and `code tunnel user login`.
 First cell (replace the tag with a full commit SHA for an immutable pin):
 
 ```python
-%pip install --upgrade git+https://github.com/RandMInstructor/kaggle-vscode-bootstrap.git@v0.1.1
+%pip install --upgrade git+https://github.com/RandMInstructor/kaggle-vscode-bootstrap.git@v0.1.2
 ```
 
 To develop this package itself in Kaggle, create its working checkout first:
 
 ```python
 import subprocess
-subprocess.run(["git", "clone", "--branch", "v0.1.1",
+subprocess.run(["git", "clone", "--branch", "v0.1.2",
                 "https://github.com/RandMInstructor/kaggle-vscode-bootstrap.git",
                 "/kaggle/working/kaggle-vscode-bootstrap"], check=True)
 ```
@@ -181,8 +181,10 @@ is no token in pip's URL, Git's origin or the notebook source.
 
 ## API
 
-* `authenticate_gh(token, setup_git=True)` validates GitHub API access, configures
+* `authenticate_gh(token=None, setup_git=True, environment=None)` validates GitHub API access, configures
   gh as Git's HTTPS credential helper, sets `GH_TOKEN`, reports and returns login.
+  `environment` is keyword-only and can supply `GH_TOKEN` instead of `token`.
+  An explicit token takes precedence. Caller dictionaries are copied, never mutated.
 * `checkout_repo(repo, destination=None, branch=None, create_branch=False,
   update=False)` returns an absolute `Path`. Existing destinations must have the
   matching HTTPS origin. Dirty branch changes/updates are refused. Missing
@@ -197,6 +199,15 @@ is no token in pip's URL, Git's origin or the notebook source.
   `tunnel_secret_name=None` optionally selects a separate tunnel credential.
   `auth_timeout=600` controls the device sign-in wait. `git_name`/`git_email` identify commits; they do
   not grant access. Use `code="/absolute/path/code"` for a standalone binary.
+
+`setup_vscode(..., environment=...)` overlays a copy of the notebook environment
+and forwards it through authentication, repository operations and tunnel startup.
+`secret_name` supplies `GH_TOKEN`; `tunnel_secret_name`, when provided, supplies
+`VSCODE_CLI_ACCESS_TOKEN`. Otherwise an explicitly supplied/inherited tunnel token
+is preserved, or the CLI uses its cached/device sign-in. The GitHub PAT is never
+automatically reused as the tunnel token. `VSCodeTunnel(..., environment=...)`
+snapshots the supplied overrides so later caller edits cannot alter its startup.
+Treat environment mappings as credentials: never print them or persist them.
 
 ```python
 from kaggle_vscode import checkout_repo
@@ -233,7 +244,7 @@ do not claim to prove Kaggle connectivity or interactive VS Code sign-in.
 
 ## Releases
 
-Use `@v0.1.1` or a full commit SHA in notebook pip URLs. Releases are GitHub
+Use `@v0.1.2` or a full commit SHA in notebook pip URLs. Releases are GitHub
 tags; no PyPI publication is required. Maintainers run tests, create an annotated
 version tag and publish a GitHub release. Update package version and examples
 together for later releases.

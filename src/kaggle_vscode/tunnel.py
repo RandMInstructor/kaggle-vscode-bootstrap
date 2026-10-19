@@ -12,7 +12,7 @@ _active = None
 
 
 class VSCodeTunnel:
-    def __init__(self, name="kaggle-gpu", log_path=None, code="code", workspace=None):
+    def __init__(self, name="kaggle-gpu", log_path=None, code="code", workspace=None, *, environment=None):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,19}", name):
             raise ValueError("Tunnel name must contain 1-20 letters, digits or hyphens.")
         self.name = name
@@ -24,6 +24,7 @@ class VSCodeTunnel:
         self._lock = None
         self._token = None
         self._tunnel_token = None
+        self._environment = dict(environment) if environment is not None else {}
 
     def is_running(self):
         if self.process is None or self.process.returncode is not None:
@@ -65,6 +66,7 @@ class VSCodeTunnel:
             self._lock = None
             raise RuntimeError("Another managed tunnel holds the runtime lock. Stop it in its original notebook or restart the Kaggle session.") from None
         env = os.environ.copy()
+        env.update(self._environment)
         if token is not None:
             env["VSCODE_CLI_ACCESS_TOKEN"] = token.strip()
         self._token = env.get("GH_TOKEN")

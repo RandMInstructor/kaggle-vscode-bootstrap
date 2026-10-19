@@ -20,15 +20,21 @@ def run(command, *, env=None, cwd=None, timeout=60):
         raise RuntimeError(f"{command[0]} operation failed. Check installation, Internet access, permissions and arguments.") from None
 
 
-def authenticate_gh(token, setup_git=True):
+def authenticate_gh(token=None, setup_git=True, *, environment=None):
     """Validate a PAT, configure HTTPS credentials and return the GitHub login."""
+    env = os.environ.copy()
+    if environment is not None:
+        env.update(environment)
+    # Require an explicit token or explicit environment; never silently select
+    # another account's token from the notebook when neither was supplied.
+    if token is None and environment is not None:
+        token = environment.get("GH_TOKEN")
     if not isinstance(token, str) or not token.strip():
-        raise ValueError("A nonempty GitHub token is required.")
+        raise ValueError("A nonempty GitHub token or environment containing GH_TOKEN is required.")
+    env.update(GH_TOKEN=token.strip(), GH_PROMPT_DISABLED="1", GH_HOST="github.com")
     gh = require("gh")
     if setup_git:
         require("git")
-    env = os.environ.copy()
-    env.update(GH_TOKEN=token.strip(), GH_PROMPT_DISABLED="1", GH_HOST="github.com")
     login = run([gh, "api", "--hostname", "github.com", "user", "--jq", ".login"], env=env, timeout=30)
     import re
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}", login):
