@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kaggle-vscode-bootstrap"
+version = "0.1.0"
+description = "GitHub authentication and managed VS Code tunnels for Kaggle notebooks"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "RandMInstructor"}]
+dependencies = []
+classifiers = ["Programming Language :: Python :: 3", "Operating System :: POSIX :: Linux"]
+
+[project.urls]
+Repository = "https://github.com/RandMInstructor/kaggle-vscode-bootstrap"
+
+[tool.setuptools.packages.find]
+where = ["src"]
