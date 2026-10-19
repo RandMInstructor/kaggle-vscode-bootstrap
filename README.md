@@ -74,15 +74,36 @@ Explicit `VSCODE_CLI_ACCESS_TOKEN` values are preserved. The package passes
 them in the environment of `code tunnel user login --provider github` before
 launching the tunnel, since this variable belongs to the CLI's login command.
 To retrieve a tunnel credential from Kaggle Secrets, add
-`tunnel_secret_name="VSCODE_TUNNEL_TOKEN"` to `setup_vscode`. If your credential
-works for both GitHub and tunnels, explicitly set `tunnel_secret_name` to the
-same name as `secret_name`; the package never assumes every GitHub PAT works
-for Microsoft's tunneling service. A rejected tunnel token fails immediately
+`tunnel_secret_name="VSCODE_TUNNEL_TOKEN"` to `setup_vscode` only for a credential
+already verified against Microsoft's tunnel service. **Do not reuse your GitHub
+PAT as the tunnel credential.** A successful CLI login may merely store the PAT;
+the tunnel service can still reject it with HTTP 401. This is reported in
+[VS Code issue #310726](https://github.com/microsoft/vscode/issues/310726).
+A rejected tunnel token fails immediately
 without displaying the token. With no tunnel token, cached VS Code sign-in or
 the visible device flow is used. `VSCodeTunnel.start(token=...)` also supports
 explicit environment-only token login. No token is added to command arguments.
 The CLI manages its own sign-in storage; tunnel login may persist credentials
 in its private CLI data directory. Do not publish that directory.
+
+If you previously supplied a PAT to the tunnel, removing `tunnel_secret_name`
+alone is insufficient because the CLI cached it. In the notebook, reset tunnel
+sign-in and complete the displayed device flow:
+
+```python
+import os, shutil, subprocess
+from pathlib import Path
+
+os.environ.pop("VSCODE_CLI_ACCESS_TOKEN", None)
+os.environ.pop("VSCODE_CLI_REFRESH_TOKEN", None)
+code = shutil.which("code") or str(Path.home() / ".cache/kaggle-vscode/bin/code")
+subprocess.run([code, "tunnel", "user", "logout"], check=True)
+subprocess.run([code, "tunnel", "user", "login", "--provider", "github"], check=True)
+```
+
+Then rerun `setup_vscode(secret_name="GITHUB_TOKEN", accept_license=True)`
+without `tunnel_secret_name`. This preserves GitHub PAT authentication for gh
+and Git while the tunnel uses its separate device-authenticated session.
 
 New server and terminal processes inherit `GH_TOKEN`. Open a **new** terminal:
 

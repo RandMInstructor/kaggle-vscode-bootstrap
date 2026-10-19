@@ -32,6 +32,9 @@ def shutdown(*args):
     child.wait()
     sys.exit(0)
 signal.signal(signal.SIGTERM, shutdown)
+if os.environ.get("FAKE_UNAUTHORIZED"):
+    print("HTTP status 401 Unauthorized", flush=True)
+    sys.exit(2)
 if os.environ.get("FAKE_EXIT"): sys.exit(2)
 if os.environ.get("FAKE_DEVICE"):
     print("To grant access to the server, please log into https://github.com/login/device and use code TEST-CODE", flush=True)
@@ -109,6 +112,16 @@ time.sleep(1000)
         self.session.start("tunnel-secret", accept_license=True)
         self.assertEqual(self.session._tunnel_token, "tunnel-secret")
         self.assertIn("vscode_pat=True", self.session.logs())
+
+    @patch.dict(os.environ, {"FAKE_UNAUTHORIZED": "1"})
+    def test_service_rejection_requires_device_reauthentication(self):
+        # CLI login itself succeeds; the service later rejects the credential.
+        with self.assertRaisesRegex(RuntimeError, "cached PAT") as error:
+            self.session.start("tunnel-secret", accept_license=True)
+        self.assertIn("tunnel user logout", str(error.exception))
+        self.assertNotIn("tunnel-secret", str(error.exception))
+        self.assertIsNone(self.session.process)
+        self.assertIsNone(self.session._lock)
 
     def test_logs_redact_and_zero_lines(self):
         self.session.log_path.write_text("ghp_example123\nsecret-value\ntunnel-secret")

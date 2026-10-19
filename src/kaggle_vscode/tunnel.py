@@ -87,7 +87,16 @@ class VSCodeTunnel:
             device_prompt = None
             while time.monotonic() < deadline:
                 if not self.is_running():
-                    raise RuntimeError("VS Code tunnel exited early. " + self.logs())
+                    logs = self.logs()
+                    if "401" in logs and ("Unauthorized" in logs or "unauthorized" in logs):
+                        raise RuntimeError(
+                            "Microsoft's tunnel service rejected the VS Code credential (401 Unauthorized). "
+                            "GitHub CLI authentication does not establish tunnel access. "
+                            "Remove VSCODE_CLI_ACCESS_TOKEN and VSCODE_CLI_REFRESH_TOKEN from the notebook environment, "
+                            "run `code tunnel user logout`, then `code tunnel user login --provider github` "
+                            "and complete device sign-in. Retry setup without tunnel_secret_name; keep secret_name for GitHub/Git. "
+                            "A cached PAT can cause this even after tunnel_secret_name is removed. " + logs)
+                    raise RuntimeError("VS Code tunnel exited early. " + logs)
                 logs = self.logs(200)
                 prompt = re.search(r"To grant access[^\n]*", logs)
                 if prompt and prompt.group(0) != device_prompt:
