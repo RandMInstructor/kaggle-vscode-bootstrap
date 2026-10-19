@@ -23,6 +23,7 @@ class VSCodeTunnel:
         self.url = None
         self._lock = None
         self._token = None
+        self._tunnel_token = None
 
     def is_running(self):
         if self.process is None or self.process.returncode is not None:
@@ -30,13 +31,19 @@ class VSCodeTunnel:
         # Preserve the unreaped leader PID until stop() cleans its group.
         return os.waitid(os.P_PID, self.process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None
 
-    def start(self, *, timeout=120, accept_license=False):
-        """Wait for a vscode.dev URL. Device sign-in must be completed separately."""
+    def start(self, token=None, *, timeout=120, auth_timeout=600, accept_license=False):
+        """Wait for readiness, displaying device sign-in or using a tunnel token.
+
+        token is optional and specific to VS Code tunnel authentication. It is
+        supplied only through the login subprocess environment, never argv.
+        """
         global _active
         if os.name != "posix":
             raise RuntimeError("Tunnel management requires Linux/POSIX (run inside Kaggle).")
-        if timeout <= 0:
-            raise ValueError("timeout must be positive.")
+        if timeout <= 0 or auth_timeout <= 0:
+            raise ValueError("timeout and auth_timeout must be positive.")
+        if token is not None and (not isinstance(token, str) or not token.strip()):
+            raise ValueError("Tunnel token must be a nonempty string.")
         if self.is_running():
             return self
         if _active is not None and _active is not self and _active.is_running():
@@ -58,10 +65,15 @@ class VSCodeTunnel:
             self._lock = None
             raise RuntimeError("Another managed tunnel holds the runtime lock. Stop it in its original notebook or restart the Kaggle session.") from None
         env = os.environ.copy()
-        env.pop("VSCODE_CLI_ACCESS_TOKEN", None)
+        if token is not None:
+            env["VSCODE_CLI_ACCESS_TOKEN"] = token.strip()
         self._token = env.get("GH_TOKEN")
+        self._tunnel_token = env.get("VSCODE_CLI_ACCESS_TOKEN")
         self.url = None
         try:
+            if self._tunnel_token:
+                # This environment variable belongs to LoginArgs, not serve args.
+                run([code, "tunnel", "user", "login", "--provider", "github"], env=env, timeout=30)
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
             fd = os.open(self.log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
             os.fchmod(fd, 0o600)
@@ -72,10 +84,18 @@ class VSCodeTunnel:
                     stdin=subprocess.DEVNULL, env=env, start_new_session=True)
             _active = self
             deadline = time.monotonic() + timeout
+            device_prompt = None
             while time.monotonic() < deadline:
                 if not self.is_running():
                     raise RuntimeError("VS Code tunnel exited early. " + self.logs())
-                match = re.search(r"https://vscode\.dev/tunnel/[^\s\x1b]+", self.logs(200))
+                logs = self.logs(200)
+                prompt = re.search(r"To grant access[^\n]*", logs)
+                if prompt and prompt.group(0) != device_prompt:
+                    device_prompt = prompt.group(0)
+                    print(device_prompt, flush=True)
+                    print("Complete VS Code device sign-in above; setup is waiting for tunnel readiness.", flush=True)
+                    deadline = time.monotonic() + auth_timeout
+                match = re.search(r"https://vscode\.dev/tunnel/[^\s\x1b]+", logs)
                 if match:
                     self.url = match.group(0)
                     return self
@@ -131,6 +151,7 @@ class VSCodeTunnel:
         if not self.log_path.exists() or lines == 0:
             return ""
         text = "\n".join(self.log_path.read_text(errors="replace").splitlines()[-lines:])
-        if self._token:
-            text = text.replace(self._token, "[REDACTED]")
+        for token in (self._token, self._tunnel_token):
+            if token:
+                text = text.replace(token, "[REDACTED]")
         return re.sub(r"(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)", "[REDACTED]", text)

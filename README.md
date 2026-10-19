@@ -10,11 +10,16 @@ Enable Internet in Kaggle notebook settings. In **Add-ons → Secrets**, add
 with Contents read access to the private repositories you need; add write and
 pull-request permissions only if your development work requires them.
 
-Git, GitHub CLI (`gh`), and the standalone VS Code CLI (`code`) must be on PATH.
-Missing commands produce an immediate error. This release deliberately does
-not download or install binaries automatically. Follow the official installation
-instructions for [gh](https://github.com/cli/cli#installation) and
-[VS Code CLI](https://code.visualstudio.com/docs/remote/tunnels#using-the-code-cli).
+Git and GitHub CLI (`gh`) must be on PATH. If `code` is missing, `setup_vscode`
+automatically installs Microsoft's stable standalone CLI for Linux x64 or arm64.
+The official release metadata resolves stable to a commit and SHA-256; the
+download is verified before extracting only the regular `code` binary. It is
+cached under `~/.cache/kaggle-vscode/bin`, which is added to notebook PATH.
+No root access or write to `/usr/local/bin` is needed. Existing `code` commands
+are reused; custom missing paths fail instead of downloading an unrelated CLI.
+Use `install_code=False` to disable installation. Follow the official installation
+instructions for [gh](https://github.com/cli/cli#installation) and manual
+[VS Code CLI installation](https://code.visualstudio.com/docs/remote/tunnels#using-the-code-cli).
 For a Kaggle image without gh, `!apt-get update -qq && apt-get install -y gh`
 is one manual option. Record `gh --version`, `git --version` and `code --version`
 when reproducing a notebook; upstream CLI changes can affect readiness detection.
@@ -25,14 +30,14 @@ The CLI must support `code tunnel --help` and `code tunnel user login`.
 First cell (replace the tag with a full commit SHA for an immutable pin):
 
 ```python
-%pip install git+https://github.com/RandMInstructor/kaggle-vscode-bootstrap.git@v0.1.0
+%pip install --upgrade git+https://github.com/RandMInstructor/kaggle-vscode-bootstrap.git@v0.1.1
 ```
 
 To develop this package itself in Kaggle, create its working checkout first:
 
 ```python
 import subprocess
-subprocess.run(["git", "clone", "--branch", "v0.1.0",
+subprocess.run(["git", "clone", "--branch", "v0.1.1",
                 "https://github.com/RandMInstructor/kaggle-vscode-bootstrap.git",
                 "/kaggle/working/kaggle-vscode-bootstrap"], check=True)
 ```
@@ -40,16 +45,10 @@ subprocess.run(["git", "clone", "--branch", "v0.1.0",
 For ongoing development, switch this checkout to `main` or a new feature branch
 using `checkout_repo`; tags are detached release snapshots.
 
-VS Code authentication is separate from GitHub CLI authentication. Once per
-fresh Kaggle runtime, run this cell and follow its device-code sign-in prompt:
-
-```python
-import subprocess
-subprocess.run(["code", "tunnel", "user", "login", "--provider", "github"], check=True)
-```
-
 Review the [server license](https://aka.ms/vscode-server-license) before setting
-`accept_license=True`. Then configure and launch:
+`accept_license=True`. Configure and launch; when device sign-in is needed,
+setup prints the link/code immediately and waits up to `auth_timeout=600`
+seconds for you to complete it. The normal readiness timeout is 120 seconds.
 
 ```python
 from kaggle_vscode import setup_vscode
@@ -71,8 +70,19 @@ print(session.url)  # emitted only after the CLI reports its vscode.dev URL
 Open the URL, authenticate to VS Code as requested, then open `session.workspace`
 in the connected editor. A URL is a readiness signal, not an end-to-end client
 connection test. GitHub API success does not authenticate the tunnel.
-`VSCODE_CLI_ACCESS_TOKEN` is never populated from a GitHub PAT and is removed
-from the tunnel child environment. PAT support for that variable is not claimed.
+Explicit `VSCODE_CLI_ACCESS_TOKEN` values are preserved. The package passes
+them in the environment of `code tunnel user login --provider github` before
+launching the tunnel, since this variable belongs to the CLI's login command.
+To retrieve a tunnel credential from Kaggle Secrets, add
+`tunnel_secret_name="VSCODE_TUNNEL_TOKEN"` to `setup_vscode`. If your credential
+works for both GitHub and tunnels, explicitly set `tunnel_secret_name` to the
+same name as `secret_name`; the package never assumes every GitHub PAT works
+for Microsoft's tunneling service. A rejected tunnel token fails immediately
+without displaying the token. With no tunnel token, cached VS Code sign-in or
+the visible device flow is used. `VSCodeTunnel.start(token=...)` also supports
+explicit environment-only token login. No token is added to command arguments.
+The CLI manages its own sign-in storage; tunnel login may persist credentials
+in its private CLI data directory. Do not publish that directory.
 
 New server and terminal processes inherit `GH_TOKEN`. Open a **new** terminal:
 
@@ -96,7 +106,7 @@ session.restart(accept_license=True)
 ```
 
 Repeated `setup_vscode` calls reuse the active session with matching name,
-workspace, executable and token. Stop it before changing those values. A Linux
+workspace, executable and credentials. Stop it before changing those values. A Linux
 file lock prevents another package instance from silently starting a duplicate.
 After notebook state loss, restart the Kaggle runtime: the package deliberately
 does not recover or signal unverified PIDs from disk. An independently launched
@@ -158,11 +168,13 @@ is no token in pip's URL, Git's origin or the notebook source.
   remote branches are created only with explicit permission. Updates are
   opt-in and fast-forward only; there is no reset, clean or automatic merge.
 * `VSCodeTunnel(name="kaggle-gpu", log_path=None, code="code", workspace=None)`
-  supports `start(timeout=120, accept_license=False)`, `restart`, `is_running`,
+  supports `start(token=None, timeout=120, auth_timeout=600, accept_license=False)`, `restart`, `is_running`,
   `logs(lines=50)`, and `stop(timeout=10)`.
 * `setup_vscode(...)` retrieves the named Kaggle secret lazily, authenticates,
   optionally checks out the repository, sets repository-local commit identity,
-  and starts/reuses a session. `git_name`/`git_email` identify commits; they do
+  and starts/reuses a session. `install_code=True` installs the CLI if missing;
+  `tunnel_secret_name=None` optionally selects a separate tunnel credential.
+  `auth_timeout=600` controls the device sign-in wait. `git_name`/`git_email` identify commits; they do
   not grant access. Use `code="/absolute/path/code"` for a standalone binary.
 
 ```python
@@ -176,10 +188,12 @@ workspace = checkout_repo("OWNER/another-project", "/kaggle/working/another",
 * Missing secret: confirm its spelling and notebook authorization; restart setup.
 * gh operation failed: confirm Internet, PAT expiry, repository permissions and
   organization approval/SSO. Errors omit raw command output to avoid leaking PATs.
-* Missing CLI: install the official tools above; a desktop `code` wrapper may
+* Missing CLI: setup installs `code` automatically by default; install gh and
+  Git manually. A desktop `code` wrapper may
   differ from the standalone CLI. Check `code tunnel --help`.
 * Early exit / timeout: inspect `session.logs()` when available, or the sanitized
-  error text. Complete device sign-in, check name availability/network access,
+  error text. Device prompts now appear during setup, rather than only after
+  timeout. Complete device sign-in, check name availability/network access,
   then retry. A failed startup stops the process it launched.
 * Logs are local, mode 0600, and ignored by Git. Treat all raw CLI logs as private;
   `logs()` redacts the inherited PAT and common GitHub token formats.
@@ -198,7 +212,7 @@ do not claim to prove Kaggle connectivity or interactive VS Code sign-in.
 
 ## Releases
 
-Use `@v0.1.0` or a full commit SHA in notebook pip URLs. Releases are GitHub
+Use `@v0.1.1` or a full commit SHA in notebook pip URLs. Releases are GitHub
 tags; no PyPI publication is required. Maintainers run tests, create an annotated
 version tag and publish a GitHub release. Update package version and examples
 together for later releases.

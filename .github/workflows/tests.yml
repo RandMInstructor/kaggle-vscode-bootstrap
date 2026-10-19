@@ -15,3 +15,18 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install .
       - run: python -m unittest discover -s tests -v
+      - name: Verify official CLI installation and login environment support
+        if: matrix.python == '3.13'
+        run: |
+          python - <<'PY'
+          from unittest.mock import patch
+          import subprocess
+          from kaggle_vscode.install import ensure_code
+          with patch('kaggle_vscode.install.shutil.which', return_value=None):
+              code = ensure_code()
+          subprocess.run([code, '--version'], check=True)
+          subprocess.run([code, 'tunnel', '--help'], check=True)
+          result = subprocess.run([code, 'tunnel', 'user', 'login', '--help'],
+                                  capture_output=True, text=True, check=True)
+          assert 'VSCODE_CLI_ACCESS_TOKEN' in result.stdout
+          PY
